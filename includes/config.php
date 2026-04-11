@@ -3,11 +3,34 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-define('BLOG_DB_HOST', 'localhost');
-define('BLOG_DB_PORT', 3306);
-define('BLOG_DB_NAME', 'csts_blog');
-define('BLOG_DB_USER', 'root');
-define('BLOG_DB_PASS', 'Hausawi@2025');
+function blog_env(string $key, ?string $default = null): ?string
+{
+    $value = getenv($key);
+    return $value === false ? $default : $value;
+}
+
+function blog_env_bool(string $key, bool $default): bool
+{
+    $value = getenv($key);
+    if ($value === false) {
+        return $default;
+    }
+
+    return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
+}
+
+function blog_is_local_environment(): bool
+{
+    $host = strtolower((string) ($_SERVER['HTTP_HOST'] ?? ''));
+    return $host === 'localhost' || str_starts_with($host, '127.0.0.1');
+}
+
+define('BLOG_DB_HOST', blog_env('BLOG_DB_HOST', 'localhost'));
+define('BLOG_DB_PORT', (int) blog_env('BLOG_DB_PORT', '3306'));
+define('BLOG_DB_NAME', blog_env('BLOG_DB_NAME', 'csts_blog'));
+define('BLOG_DB_USER', blog_env('BLOG_DB_USER', 'root'));
+define('BLOG_DB_PASS', blog_env('BLOG_DB_PASS', 'Hausawi@2025'));
+define('BLOG_DB_AUTO_SETUP', blog_env_bool('BLOG_DB_AUTO_SETUP', blog_is_local_environment()));
 
 define('BLOG_SITE_NAME', 'CSTS Blog');
 
@@ -23,7 +46,9 @@ function blog_db(): PDO
         return $pdo;
     }
 
-    blog_prepare_mysql_database();
+    if (BLOG_DB_AUTO_SETUP) {
+        blog_prepare_mysql_database();
+    }
 
     $dsn = sprintf(
         'mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
@@ -32,11 +57,18 @@ function blog_db(): PDO
         BLOG_DB_NAME
     );
 
-    $pdo = new PDO($dsn, BLOG_DB_USER, BLOG_DB_PASS);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    try {
+        $pdo = new PDO($dsn, BLOG_DB_USER, BLOG_DB_PASS);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    } catch (PDOException $exception) {
+        error_log('CSTS Blog DB connection failed: ' . $exception->getMessage());
+        throw $exception;
+    }
 
-    blog_bootstrap($pdo);
+    if (BLOG_DB_AUTO_SETUP) {
+        blog_bootstrap($pdo);
+    }
 
     return $pdo;
 }
