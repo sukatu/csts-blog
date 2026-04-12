@@ -8,7 +8,7 @@ if ($slug === '') {
 }
 
 $pdo = blog_db();
-$stmt = $pdo->prepare('SELECT title, summary, content, category, image_url, published_at FROM posts WHERE slug = :slug AND status = :status LIMIT 1');
+$stmt = $pdo->prepare('SELECT title, summary, content, category, image_url, source_name, source_url, published_at FROM posts WHERE slug = :slug AND status = :status LIMIT 1');
 $stmt->execute([':slug' => $slug, ':status' => 'published']);
 $post = $stmt->fetch();
 
@@ -41,9 +41,10 @@ if (!$post) {
 
   <header class="topbar">
     <div class="container topbar-inner">
-      <div class="brand logo-only"><img src="assets/csts-logo.png" alt="CSTS Logo" class="brand-logo">CSTS Blog<small>News & Events</small></div>
+      <a href="index.php" class="brand logo-only" aria-label="Go to CSTS Blog home"><img src="assets/csts-logo.png" alt="CSTS Logo" class="brand-logo">CSTS Blog<small>News & Events</small></a>
       <nav class="nav-links">
         <a href="index.php">Back to blog</a>
+        <a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">CSTS Website</a>
         <a href="admin/login.php">Admin</a>
       </nav>
     </div>
@@ -66,12 +67,65 @@ if (!$post) {
       <?php if (!empty($post['image_url'])): ?>
         <img src="<?php echo blog_e($post['image_url']); ?>" alt="<?php echo blog_e($post['title']); ?>" style="width:100%; border-radius:10px; margin:18px 0;">
       <?php endif; ?>
+      <?php if (!empty($post['source_url'])): ?>
+        <p class="meta" style="margin: 0 0 12px;">Source: <a href="<?php echo blog_e($post['source_url']); ?>" target="_blank" rel="noopener noreferrer nofollow"><?php echo blog_e($post['source_name'] ?: 'External'); ?></a></p>
+      <?php endif; ?>
       <div class="article-content"><?php echo $post['content']; ?></div>
     </article>
   </main>
 
   <footer class="footer">
-    <div class="container">&copy; <?php echo date('Y'); ?> CSTS Blog.</div>
+    <div class="container footer-grid">
+      <section class="footer-brand">
+        <a href="index.php" aria-label="Go to CSTS Blog home"><img src="assets/csts-logo.png" alt="CSTS Logo" class="footer-logo"></a>
+        <p>Corporate strategy, governance, and market intelligence for leaders in Ghana.</p>
+        <div class="footer-socials">
+          <a href="https://www.linkedin.com" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+          <a href="https://x.com" target="_blank" rel="noopener noreferrer">X</a>
+          <a href="https://www.facebook.com" target="_blank" rel="noopener noreferrer">Facebook</a>
+        </div>
+      </section>
+
+      <section>
+        <h4>Explore</h4>
+        <ul>
+          <li><a href="index.php">Home</a></li>
+          <li><a href="index.php?category=news">Business News</a></li>
+          <li><a href="index.php?category=events">Events</a></li>
+          <li><a href="index.php?category=all">All Publications</a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">About CSTS</a></li>
+          <li><a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">Services</a></li>
+          <li><a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">Insights</a></li>
+          <li><a href="mailto:events@cstsghana.com">Contact Team</a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h4>Contact</h4>
+        <ul>
+          <li><a href="mailto:events@cstsghana.com">events@cstsghana.com</a></li>
+          <li><a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">www.cstsghana.com</a></li>
+          <li>Accra, Ghana</li>
+          <li><a href="admin/login.php">Admin Portal</a></li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="footer-bottom">
+      <div class="container footer-bottom-inner">
+        <span>&copy; <?php echo date('Y'); ?> CSTS Blog. All rights reserved.</span>
+        <div class="footer-bottom-links">
+          <a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">Main Website</a>
+          <a href="mailto:events@cstsghana.com">Support</a>
+        </div>
+      </div>
+    </div>
   </footer>
 </body>
 </html>

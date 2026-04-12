@@ -2,11 +2,54 @@
 require_once __DIR__ . '/includes/config.php';
 
 $pdo = blog_db();
+$newsletterName = '';
+$newsletterEmail = '';
+$newsletterSuccess = '';
+$newsletterError = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['form_type'] ?? '') === 'newsletter_subscribe') {
+  $newsletterName = trim((string) ($_POST['name'] ?? ''));
+  $newsletterEmail = trim((string) ($_POST['email'] ?? ''));
+
+  if ($newsletterName === '' || $newsletterEmail === '') {
+    $newsletterError = 'Please enter both name and email.';
+  } elseif (!filter_var($newsletterEmail, FILTER_VALIDATE_EMAIL)) {
+    $newsletterError = 'Please enter a valid email address.';
+  } else {
+    try {
+      blog_subscribe_newsletter($pdo, $newsletterName, $newsletterEmail);
+      $newsletterSuccess = 'Thanks for subscribing. You will receive the latest CSTS updates in your inbox.';
+      $newsletterName = '';
+      $newsletterEmail = '';
+    } catch (Throwable $exception) {
+      $newsletterError = 'Subscription failed. Please try again shortly.';
+      error_log('Newsletter subscription error: ' . $exception->getMessage());
+    }
+  }
+}
+
 $q = trim($_GET['q'] ?? '');
 $category = $_GET['category'] ?? 'all';
+$source = trim($_GET['source'] ?? 'all');
+$page = max(1, (int) ($_GET['page'] ?? 1));
+$perPage = 9;
+
+try {
+  $settingsStmt = $pdo->prepare('SELECT setting_value FROM site_settings WHERE setting_key = :setting_key LIMIT 1');
+  $settingsStmt->execute([':setting_key' => 'posts_per_page']);
+  $configuredPerPage = (int) $settingsStmt->fetchColumn();
+  if ($configuredPerPage > 0 && $configuredPerPage <= 50) {
+    $perPage = $configuredPerPage;
+  }
+} catch (Throwable $exception) {
+  // Keep default page size if settings table is unavailable.
+}
 
 $where = ['status = :status'];
 $params = [':status' => 'published'];
+
+$sourcesStmt = $pdo->query('SELECT DISTINCT source_name FROM posts WHERE status = "published" AND source_name IS NOT NULL AND source_name <> "" ORDER BY source_name ASC');
+$availableSources = $sourcesStmt ? array_values(array_filter(array_map(static fn($v) => (string) $v, $sourcesStmt->fetchAll(PDO::FETCH_COLUMN)))) : [];
 
 if ($q !== '') {
     $where[] = '(title LIKE :q OR summary LIKE :q OR content LIKE :q)';
@@ -18,17 +61,67 @@ if (in_array($category, ['news', 'events'], true)) {
     $params[':category'] = $category;
 }
 
-$sql = 'SELECT id, title, slug, summary, content, category, image_url, published_at
-        FROM posts
-        WHERE ' . implode(' AND ', $where) . '
-  ORDER BY published_at DESC';
+if ($source !== 'all' && in_array($source, $availableSources, true)) {
+  $where[] = 'source_name = :source_name';
+  $params[':source_name'] = $source;
+}
+
+$countSql = 'SELECT COUNT(*) FROM posts WHERE ' . implode(' AND ', $where);
+$countStmt = $pdo->prepare($countSql);
+$countStmt->execute($params);
+$totalPosts = (int) $countStmt->fetchColumn();
+$totalPages = max(1, (int) ceil($totalPosts / $perPage));
+
+if ($page > $totalPages) {
+  $page = $totalPages;
+}
+
+$offset = ($page - 1) * $perPage;
+$sql = 'SELECT id, title, slug, summary, content, category, image_url, source_name, published_at
+    FROM posts
+    WHERE ' . implode(' AND ', $where) . '
+  ORDER BY published_at DESC, id DESC
+     LIMIT :limit OFFSET :offset';
 
 $stmt = $pdo->prepare($sql);
-$stmt->execute($params);
+foreach ($params as $key => $value) {
+  $stmt->bindValue($key, $value, PDO::PARAM_STR);
+}
+$stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+$stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+$stmt->execute();
 $posts = $stmt->fetchAll();
 
 $featuredPost = $posts[0] ?? null;
 $listPosts = array_slice($posts, 1);
+$feedPosts = $listPosts ?: $posts;
+$leadPost = $feedPosts[0] ?? null;
+$gridPosts = array_slice($feedPosts, 1);
+
+$headlineStmt = $pdo->query('SELECT title, slug, source_name, published_at FROM posts WHERE status = "published" ORDER BY published_at DESC, id DESC LIMIT 1');
+$headlinePost = $headlineStmt ? $headlineStmt->fetch() : null;
+
+$sourceMixStmt = $pdo->query('SELECT source_name, COUNT(*) AS total_posts FROM posts WHERE status = "published" AND source_name IS NOT NULL AND source_name <> "" GROUP BY source_name ORDER BY total_posts DESC, source_name ASC LIMIT 6');
+$sourceMix = $sourceMixStmt ? $sourceMixStmt->fetchAll() : [];
+
+$last24hStmt = $pdo->query('SELECT COUNT(*) FROM posts WHERE status = "published" AND published_at >= (NOW() - INTERVAL 1 DAY)');
+$last24hCount = $last24hStmt ? (int) $last24hStmt->fetchColumn() : 0;
+
+$buildPageUrl = static function (int $targetPage) use ($q, $category, $source): string {
+  $query = [];
+  if ($q !== '') {
+    $query['q'] = $q;
+  }
+  if ($category !== 'all') {
+    $query['category'] = $category;
+  }
+  if ($source !== 'all') {
+    $query['source'] = $source;
+  }
+  $query['page'] = $targetPage;
+
+  return 'index.php?' . http_build_query($query);
+};
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -54,15 +147,16 @@ $listPosts = array_slice($posts, 1);
 
   <header class="topbar">
     <div class="container topbar-inner">
-      <div class="brand logo-only">
+      <a href="index.php" class="brand logo-only" aria-label="Go to CSTS Blog home">
         <img src="assets/csts-logo.png" alt="CSTS Logo" class="brand-logo">
         CSTS Blog
         <small>News & Events</small>
-      </div>
+      </a>
       <nav class="nav-links">
         <a href="index.php">Home</a>
         <a href="?category=news">News</a>
         <a href="?category=events">Events</a>
+        <a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">CSTS Website</a>
         <a href="admin/login.php">Admin</a>
       </nav>
     </div>
@@ -81,6 +175,12 @@ $listPosts = array_slice($posts, 1);
               <option value="all" <?php echo $category === 'all' ? 'selected' : ''; ?>>All categories</option>
               <option value="news" <?php echo $category === 'news' ? 'selected' : ''; ?>>News</option>
               <option value="events" <?php echo $category === 'events' ? 'selected' : ''; ?>>Events</option>
+            </select>
+            <select class="select" name="source">
+              <option value="all" <?php echo $source === 'all' ? 'selected' : ''; ?>>All sources</option>
+              <?php foreach ($availableSources as $sourceOption): ?>
+                <option value="<?php echo blog_e($sourceOption); ?>" <?php echo $source === $sourceOption ? 'selected' : ''; ?>><?php echo blog_e($sourceOption); ?></option>
+              <?php endforeach; ?>
             </select>
             <button class="btn" type="submit">Filter</button>
           </form>
@@ -109,40 +209,216 @@ $listPosts = array_slice($posts, 1);
     </div>
   </div>
 
-  <main class="container">
-    <div class="section-head">
-      <h2>Recent Publications</h2>
-      <a href="?category=all">View all</a>
-    </div>
+  <main class="container content-layout">
+    <section class="feed-main">
+      <div class="section-head">
+        <h2>Recent Publications</h2>
+        <a href="index.php?category=all&amp;source=all&amp;page=1">View all</a>
+      </div>
 
-    <?php if (empty($posts)): ?>
-      <div class="panel" style="margin-top:24px;">No posts found for your filter.</div>
-    <?php else: ?>
-      <div class="grid">
-        <?php foreach ($listPosts ?: $posts as $post): ?>
-          <article class="card">
-            <div class="card-image" style="background-image:url('<?php echo blog_e($post['image_url'] ?: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=1200&q=80'); ?>');"></div>
-            <div class="card-body">
-              <span class="badge"><?php echo blog_e($post['category']); ?></span>
-              <h3><?php echo blog_e($post['title']); ?></h3>
-              <div class="meta"><?php echo blog_format_date($post['published_at']); ?></div>
-              <p class="summary"><?php echo blog_e($post['summary'] ?: blog_excerpt($post['content'])); ?></p>
-              <a class="read-more" href="post.php?slug=<?php echo urlencode($post['slug']); ?>">Read more</a>
+      <div class="feed-signal-bar">
+        <div class="feed-signal-title">Editorial Desk</div>
+        <div class="feed-signal-chips">
+          <span class="signal-chip">Latest first</span>
+          <span class="signal-chip"><?php echo $totalPosts; ?> stories</span>
+          <?php if ($category !== 'all'): ?>
+            <span class="signal-chip"><?php echo strtoupper(blog_e($category)); ?></span>
+          <?php endif; ?>
+          <?php if ($source !== 'all'): ?>
+            <span class="signal-chip"><?php echo blog_e($source); ?></span>
+          <?php endif; ?>
+        </div>
+      </div>
+
+      <?php if (empty($posts)): ?>
+        <div class="panel" style="margin-top:24px;">No posts found for your filter.</div>
+      <?php else: ?>
+        <?php if ($leadPost): ?>
+          <article class="lead-story">
+            <a class="lead-story-image" href="post.php?slug=<?php echo urlencode($leadPost['slug']); ?>" style="background-image:url('<?php echo blog_e($leadPost['image_url'] ?: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=1400&q=80'); ?>');"></a>
+            <div class="lead-story-body">
+              <span class="badge"><?php echo blog_e($leadPost['category']); ?></span>
+              <h3><a href="post.php?slug=<?php echo urlencode($leadPost['slug']); ?>"><?php echo blog_e($leadPost['title']); ?></a></h3>
+              <div class="meta"><?php echo blog_format_date($leadPost['published_at']); ?><?php if (!empty($leadPost['source_name'])): ?> • <?php echo blog_e($leadPost['source_name']); ?><?php endif; ?></div>
+              <p class="summary"><?php echo blog_e($leadPost['summary'] ?: blog_excerpt($leadPost['content'], 210)); ?></p>
+              <a class="read-more" href="post.php?slug=<?php echo urlencode($leadPost['slug']); ?>">Read full brief</a>
             </div>
           </article>
-        <?php endforeach; ?>
-      </div>
-    <?php endif; ?>
+        <?php endif; ?>
+
+        <?php if (!empty($gridPosts)): ?>
+          <div class="grid feed-grid">
+            <?php foreach ($gridPosts as $post): ?>
+              <article class="card">
+                <div class="card-image" style="background-image:url('<?php echo blog_e($post['image_url'] ?: 'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?auto=format&fit=crop&w=1200&q=80'); ?>');"></div>
+                <div class="card-body">
+                  <span class="badge"><?php echo blog_e($post['category']); ?></span>
+                  <h3><?php echo blog_e($post['title']); ?></h3>
+                  <div class="meta"><?php echo blog_format_date($post['published_at']); ?><?php if (!empty($post['source_name'])): ?> • <?php echo blog_e($post['source_name']); ?><?php endif; ?></div>
+                  <p class="summary"><?php echo blog_e($post['summary'] ?: blog_excerpt($post['content'])); ?></p>
+                  <a class="read-more" href="post.php?slug=<?php echo urlencode($post['slug']); ?>">Read more</a>
+                </div>
+              </article>
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
+
+        <?php if ($totalPages > 1): ?>
+          <nav class="pagination" aria-label="Posts pagination">
+            <a class="page-link <?php echo $page <= 1 ? 'disabled' : ''; ?>" href="<?php echo $page <= 1 ? '#' : blog_e($buildPageUrl($page - 1)); ?>">Previous</a>
+
+            <span class="page-status">Page <?php echo $page; ?> of <?php echo $totalPages; ?></span>
+
+            <a class="page-link <?php echo $page >= $totalPages ? 'disabled' : ''; ?>" href="<?php echo $page >= $totalPages ? '#' : blog_e($buildPageUrl($page + 1)); ?>">Next</a>
+          </nav>
+        <?php endif; ?>
+      <?php endif; ?>
+    </section>
+
+    <aside class="feed-sidebar" aria-label="Important updates and quick panels">
+      <section class="sidebar-panel sidebar-highlight">
+        <p class="sidebar-kicker">Important</p>
+        <h4>Breaking Market Update</h4>
+        <?php if ($headlinePost): ?>
+          <a class="sidebar-link" href="post.php?slug=<?php echo urlencode($headlinePost['slug']); ?>"><?php echo blog_e($headlinePost['title']); ?></a>
+          <p class="meta"><?php echo blog_format_date($headlinePost['published_at']); ?><?php if (!empty($headlinePost['source_name'])): ?> • <?php echo blog_e($headlinePost['source_name']); ?><?php endif; ?></p>
+        <?php else: ?>
+          <p class="meta">No recent update available.</p>
+        <?php endif; ?>
+      </section>
+
+      <section class="sidebar-panel">
+        <h4>Live Snapshot</h4>
+        <div class="sidebar-stats">
+          <div>
+            <span>Published (24h)</span>
+            <strong><?php echo $last24hCount; ?></strong>
+          </div>
+          <div>
+            <span>Total Sources</span>
+            <strong><?php echo count($availableSources); ?></strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="sidebar-panel">
+        <h4>Top Sources</h4>
+        <?php if (empty($sourceMix)): ?>
+          <p class="meta">No external source data yet.</p>
+        <?php else: ?>
+          <ul class="sidebar-list">
+            <?php foreach ($sourceMix as $sourceRow): ?>
+              <li>
+                <span><?php echo blog_e($sourceRow['source_name']); ?></span>
+                <strong><?php echo (int) $sourceRow['total_posts']; ?></strong>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
+      </section>
+
+      <section class="sidebar-panel">
+        <h4>Quick Actions</h4>
+        <ul class="sidebar-links">
+          <li><a href="index.php?category=news">View Business Headlines</a></li>
+          <li><a href="index.php?category=events">Check Events</a></li>
+          <li><a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">Visit CSTS Main Site</a></li>
+          <li><a href="mailto:events@cstsghana.com">Request Partnership Desk</a></li>
+        </ul>
+      </section>
+    </aside>
   </main>
 
   <section class="newsletter-band">
     <div class="container">
-      <h3>CSTS Governance Newsletter</h3>
+      <div class="newsletter-card">
+        <div class="newsletter-intro">
+          <p class="newsletter-kicker">CSTS Briefings</p>
+          <h3>Get the latest news right in your inbox.</h3>
+          <p class="newsletter-note">Receive practical updates on business, corporate, and marketing trends in Ghana.</p>
+        </div>
+
+        <div class="newsletter-form-wrap">
+          <?php if ($newsletterSuccess !== ''): ?>
+            <div class="flash ok newsletter-flash"><?php echo blog_e($newsletterSuccess); ?></div>
+          <?php endif; ?>
+
+          <?php if ($newsletterError !== ''): ?>
+            <div class="flash err newsletter-flash"><?php echo blog_e($newsletterError); ?></div>
+          <?php endif; ?>
+
+          <form class="newsletter-form" method="post" action="index.php">
+            <input type="hidden" name="form_type" value="newsletter_subscribe">
+
+            <label class="newsletter-field">
+              <span>Name</span>
+              <input class="input" type="text" name="name" placeholder="Your full name" value="<?php echo blog_e($newsletterName); ?>" required>
+            </label>
+
+            <label class="newsletter-field">
+              <span>Email</span>
+              <input class="input" type="email" name="email" placeholder="you@example.com" value="<?php echo blog_e($newsletterEmail); ?>" required>
+            </label>
+
+            <button class="btn newsletter-submit" type="submit">Subscribe now</button>
+          </form>
+        </div>
+      </div>
     </div>
   </section>
 
   <footer class="footer">
-    <div class="container">&copy; <?php echo date('Y'); ?> CSTS Blog. All rights reserved.</div>
+    <div class="container footer-grid">
+      <section class="footer-brand">
+        <a href="index.php" aria-label="Go to CSTS Blog home"><img src="assets/csts-logo.png" alt="CSTS Logo" class="footer-logo"></a>
+        <p>Corporate strategy, governance, and market intelligence for leaders in Ghana.</p>
+        <div class="footer-socials">
+          <a href="https://www.linkedin.com" target="_blank" rel="noopener noreferrer">LinkedIn</a>
+          <a href="https://x.com" target="_blank" rel="noopener noreferrer">X</a>
+          <a href="https://www.facebook.com" target="_blank" rel="noopener noreferrer">Facebook</a>
+        </div>
+      </section>
+
+      <section>
+        <h4>Explore</h4>
+        <ul>
+          <li><a href="index.php">Home</a></li>
+          <li><a href="index.php?category=news">Business News</a></li>
+          <li><a href="index.php?category=events">Events</a></li>
+          <li><a href="index.php?category=all&amp;source=all&amp;page=1">All Publications</a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h4>Company</h4>
+        <ul>
+          <li><a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">About CSTS</a></li>
+          <li><a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">Services</a></li>
+          <li><a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">Insights</a></li>
+          <li><a href="mailto:events@cstsghana.com">Contact Team</a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h4>Contact</h4>
+        <ul>
+          <li><a href="mailto:events@cstsghana.com">events@cstsghana.com</a></li>
+          <li><a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">www.cstsghana.com</a></li>
+          <li>Accra, Ghana</li>
+          <li><a href="admin/login.php">Admin Portal</a></li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="footer-bottom">
+      <div class="container footer-bottom-inner">
+        <span>&copy; <?php echo date('Y'); ?> CSTS Blog. All rights reserved.</span>
+        <div class="footer-bottom-links">
+          <a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">Main Website</a>
+          <a href="mailto:events@cstsghana.com">Support</a>
+        </div>
+      </div>
+    </div>
   </footer>
 </body>
 </html>
