@@ -33,10 +33,47 @@ define('BLOG_DB_PASS', blog_env('BLOG_DB_PASS', 'Hausawi@2025'));
 define('BLOG_DB_AUTO_SETUP', blog_env_bool('BLOG_DB_AUTO_SETUP', blog_is_local_environment()));
 
 define('BLOG_SITE_NAME', 'CSTS Blog');
+define('BLOG_SITE_COMPANY', 'Corporate Secretarial and Training Services (CSTS) Limited');
+define('BLOG_SITE_TAGLINE', 'News, events, and market signals that matter to Ghanaian leaders.');
+
+define('BLOG_DEVELOPER_NAME', 'Issa Sukatu Abdullahi');
+define('BLOG_DEVELOPER_TITLE', 'Senior Developer');
+define('BLOG_DEVELOPER_CREDIT', 'Developer of DennisLaw Ghana Search Engine; CEO of alphasmacodeinnovations.com');
 
 define('BLOG_ADMIN_DEFAULT_USER', 'admin');
 define('BLOG_ADMIN_DEFAULT_PASS', 'Admin@123');
 define('BLOG_ADMIN_DEFAULT_EMAIL', 'admin@cstsghana.com');
+
+function blog_base_url(): string
+{
+    $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+        || (($_SERVER['SERVER_PORT'] ?? '') === '443');
+
+    $scheme = $isSecure ? 'https' : 'http';
+    $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+
+    return $scheme . '://' . $host;
+}
+
+function blog_url(string $path = ''): string
+{
+    if ($path === '') {
+        return blog_base_url();
+    }
+
+    if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
+        return $path;
+    }
+
+    return rtrim(blog_base_url(), '/') . '/' . ltrim($path, '/');
+}
+
+function blog_current_url(): string
+{
+    $requestUri = (string) ($_SERVER['REQUEST_URI'] ?? '/');
+    return rtrim(blog_base_url(), '/') . $requestUri;
+}
 
 function blog_db(): PDO
 {

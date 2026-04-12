@@ -16,13 +16,70 @@ if (!$post) {
     http_response_code(404);
     exit('Post not found.');
 }
+
+$metaTitle = $post['title'] . ' | ' . BLOG_SITE_NAME;
+$metaDescription = $post['summary'] !== '' ? $post['summary'] : blog_excerpt($post['content'], 160);
+$canonicalUrl = blog_url('post.php?slug=' . urlencode($slug));
+$metaImage = !empty($post['image_url']) ? (string) $post['image_url'] : blog_url('assets/csts-logo.png');
+$publishedIso = date('c', strtotime((string) $post['published_at']) ?: time());
+
+$articleSchema = [
+  '@context' => 'https://schema.org',
+  '@type' => 'NewsArticle',
+  'headline' => $post['title'],
+  'description' => $metaDescription,
+  'datePublished' => $publishedIso,
+  'dateModified' => $publishedIso,
+  'mainEntityOfPage' => $canonicalUrl,
+  'image' => [$metaImage],
+  'author' => [
+    '@type' => 'Person',
+    'name' => BLOG_DEVELOPER_NAME,
+  ],
+  'publisher' => [
+    '@type' => 'Organization',
+    'name' => BLOG_SITE_COMPANY,
+    'logo' => [
+      '@type' => 'ImageObject',
+      'url' => blog_url('assets/csts-logo.png'),
+    ],
+  ],
+];
+
+if (!empty($post['source_url'])) {
+  $articleSchema['isBasedOn'] = $post['source_url'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title><?php echo blog_e($post['title']); ?> | CSTS Blog</title>
+  <title><?php echo blog_e($metaTitle); ?></title>
+  <meta name="description" content="<?php echo blog_e($metaDescription); ?>">
+  <meta name="author" content="<?php echo blog_e(BLOG_DEVELOPER_NAME); ?>">
+  <meta name="developer" content="<?php echo blog_e(BLOG_DEVELOPER_NAME . ' - ' . BLOG_DEVELOPER_TITLE); ?>">
+  <meta name="credit" content="<?php echo blog_e(BLOG_DEVELOPER_CREDIT); ?>">
+  <meta name="publisher" content="<?php echo blog_e(BLOG_SITE_COMPANY); ?>">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow">
+  <link rel="canonical" href="<?php echo blog_e($canonicalUrl); ?>">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="<?php echo blog_e(BLOG_SITE_NAME); ?>">
+  <meta property="og:title" content="<?php echo blog_e($metaTitle); ?>">
+  <meta property="og:description" content="<?php echo blog_e($metaDescription); ?>">
+  <meta property="og:url" content="<?php echo blog_e($canonicalUrl); ?>">
+  <meta property="og:image" content="<?php echo blog_e($metaImage); ?>">
+  <meta property="article:published_time" content="<?php echo blog_e($publishedIso); ?>">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="<?php echo blog_e($metaTitle); ?>">
+  <meta name="twitter:description" content="<?php echo blog_e($metaDescription); ?>">
+  <meta name="twitter:image" content="<?php echo blog_e($metaImage); ?>">
+
+  <script type="application/ld+json"><?php echo json_encode($articleSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?></script>
   <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body class="blog-public">

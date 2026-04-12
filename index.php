@@ -7,7 +7,7 @@ $newsletterEmail = '';
 $newsletterSuccess = '';
 $newsletterError = '';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['form_type'] ?? '') === 'newsletter_subscribe') {
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['form_type'] ?? '') === 'newsletter_subscribe') {
   $newsletterName = trim((string) ($_POST['name'] ?? ''));
   $newsletterEmail = trim((string) ($_POST['email'] ?? ''));
 
@@ -122,13 +122,80 @@ $buildPageUrl = static function (int $targetPage) use ($q, $category, $source): 
 
   return 'index.php?' . http_build_query($query);
 };
+
+$metaTitle = BLOG_SITE_NAME . ' | News & Events';
+$metaDescription = 'Latest business and corporate updates in Ghana from CSTS, including market intelligence, governance updates, and verified source references.';
+$canonicalUrl = blog_current_url();
+$metaImage = !empty($featuredPost['image_url']) ? (string) $featuredPost['image_url'] : blog_url('assets/csts-logo.png');
+
+$websiteSchema = [
+  '@context' => 'https://schema.org',
+  '@type' => 'WebSite',
+  'name' => BLOG_SITE_NAME,
+  'url' => blog_url('/'),
+  'description' => BLOG_SITE_TAGLINE,
+  'publisher' => [
+    '@type' => 'Organization',
+    'name' => BLOG_SITE_COMPANY,
+  ],
+];
+
+$organizationSchema = [
+  '@context' => 'https://schema.org',
+  '@type' => 'Organization',
+  'name' => BLOG_SITE_COMPANY,
+  'url' => blog_url('/'),
+  'logo' => blog_url('assets/csts-logo.png'),
+  'sameAs' => [
+    'https://www.linkedin.com/company/csts-ghana',
+    'https://www.facebook.com/cstsghana',
+    'https://x.com/cstsgh',
+    'https://www.instagram.com/cstsghana/',
+  ],
+];
+
+$developerSchema = [
+  '@context' => 'https://schema.org',
+  '@type' => 'Person',
+  'name' => BLOG_DEVELOPER_NAME,
+  'jobTitle' => BLOG_DEVELOPER_TITLE,
+  'description' => BLOG_DEVELOPER_CREDIT,
+  'url' => 'https://alphasmacodeinnovations.com',
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CSTS Blog | News & Events</title>
+  <title><?php echo blog_e($metaTitle); ?></title>
+  <meta name="description" content="<?php echo blog_e($metaDescription); ?>">
+  <meta name="keywords" content="Ghana business news, corporate governance Ghana, market insights Ghana, CSTS blog, leadership updates">
+  <meta name="author" content="<?php echo blog_e(BLOG_DEVELOPER_NAME); ?>">
+  <meta name="developer" content="<?php echo blog_e(BLOG_DEVELOPER_NAME . ' - ' . BLOG_DEVELOPER_TITLE); ?>">
+  <meta name="credit" content="<?php echo blog_e(BLOG_DEVELOPER_CREDIT); ?>">
+  <meta name="publisher" content="<?php echo blog_e(BLOG_SITE_COMPANY); ?>">
+  <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow">
+  <link rel="canonical" href="<?php echo blog_e($canonicalUrl); ?>">
+  <link rel="sitemap" type="application/xml" title="Sitemap" href="<?php echo blog_e(blog_url('sitemap.php')); ?>">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="<?php echo blog_e(BLOG_SITE_NAME); ?>">
+  <meta property="og:title" content="<?php echo blog_e($metaTitle); ?>">
+  <meta property="og:description" content="<?php echo blog_e($metaDescription); ?>">
+  <meta property="og:url" content="<?php echo blog_e($canonicalUrl); ?>">
+  <meta property="og:image" content="<?php echo blog_e($metaImage); ?>">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="<?php echo blog_e($metaTitle); ?>">
+  <meta name="twitter:description" content="<?php echo blog_e($metaDescription); ?>">
+  <meta name="twitter:image" content="<?php echo blog_e($metaImage); ?>">
+
+  <script type="application/ld+json"><?php echo json_encode($websiteSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?></script>
+  <script type="application/ld+json"><?php echo json_encode($organizationSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?></script>
+  <script type="application/ld+json"><?php echo json_encode($developerSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?></script>
   <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body class="blog-public">
