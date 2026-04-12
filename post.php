@@ -209,6 +209,8 @@ if (!empty($post['source_url'])) {
   <meta name="twitter:description" content="<?php echo blog_e($metaDescription); ?>">
   <meta name="twitter:image" content="<?php echo blog_e($metaImage); ?>">
 
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6529286790085931" crossorigin="anonymous"></script>
+
   <script type="application/ld+json"><?php echo json_encode($articleSchema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?></script>
   <link rel="stylesheet" href="assets/styles.css">
 </head>
