@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/public_auth.php';
 
 $slug = trim($_GET['slug'] ?? '');
 if ($slug === '') {
@@ -8,7 +9,7 @@ if ($slug === '') {
 }
 
 $pdo = blog_db();
-$stmt = $pdo->prepare('SELECT title, summary, content, category, image_url, source_name, source_url, published_at FROM posts WHERE slug = :slug AND status = :status LIMIT 1');
+$stmt = $pdo->prepare('SELECT id, title, summary, content, category, image_url, source_name, source_url, published_at FROM posts WHERE slug = :slug AND status = :status LIMIT 1');
 $stmt->execute([':slug' => $slug, ':status' => 'published']);
 $post = $stmt->fetch();
 
@@ -16,6 +17,135 @@ if (!$post) {
     http_response_code(404);
     exit('Post not found.');
 }
+
+blog_public_auth_bootstrap($pdo);
+
+$authMessage = '';
+$authError = '';
+
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+  $formType = (string) ($_POST['form_type'] ?? '');
+
+  if ($formType === 'register') {
+    $registerResult = blog_public_register(
+      $pdo,
+      (string) ($_POST['full_name'] ?? ''),
+      (string) ($_POST['email'] ?? ''),
+      (string) ($_POST['password'] ?? '')
+    );
+    if ($registerResult['ok']) {
+      $authMessage = (string) $registerResult['message'];
+    } else {
+      $authError = (string) $registerResult['message'];
+    }
+  }
+
+  if ($formType === 'login') {
+    $loginResult = blog_public_login(
+      $pdo,
+      (string) ($_POST['email'] ?? ''),
+      (string) ($_POST['password'] ?? '')
+    );
+    if ($loginResult['ok']) {
+      $authMessage = (string) $loginResult['message'];
+    } else {
+      $authError = (string) $loginResult['message'];
+    }
+  }
+
+  if ($formType === 'logout') {
+    blog_public_logout();
+    $authMessage = 'You have been logged out.';
+  }
+
+  if ($formType === 'comment') {
+    $currentUser = blog_public_current_user($pdo);
+    if (!$currentUser) {
+      $authError = 'Please sign in to post a comment.';
+    } else {
+      $commentText = trim((string) ($_POST['comment_text'] ?? ''));
+      if ($commentText === '') {
+        $authError = 'Comment cannot be empty.';
+      } elseif (mb_strlen($commentText) > 1500) {
+        $authError = 'Comment must be 1500 characters or fewer.';
+      } else {
+        $insertComment = $pdo->prepare('INSERT INTO post_comments (post_id, community_user_id, comment_text, status, created_at, updated_at)
+            VALUES (:post_id, :community_user_id, :comment_text, "visible", :created_at, :updated_at)');
+        $now = date('Y-m-d H:i:s');
+        $insertComment->execute([
+          ':post_id' => (int) $post['id'],
+          ':community_user_id' => (int) $currentUser['id'],
+          ':comment_text' => $commentText,
+          ':created_at' => $now,
+          ':updated_at' => $now,
+        ]);
+        $authMessage = 'Comment posted successfully.';
+      }
+    }
+  }
+
+  if ($formType === 'reaction') {
+    $currentUser = blog_public_current_user($pdo);
+    if (!$currentUser) {
+      $authError = 'Please sign in to react to this post.';
+    } else {
+      $reaction = (string) ($_POST['reaction'] ?? '');
+      if (!in_array($reaction, ['like', 'dislike'], true)) {
+        $authError = 'Invalid reaction selected.';
+      } else {
+        $now = date('Y-m-d H:i:s');
+        $upsertReaction = $pdo->prepare('INSERT INTO post_reactions (post_id, community_user_id, reaction, created_at, updated_at)
+            VALUES (:post_id, :community_user_id, :reaction, :created_at, :updated_at)
+            ON DUPLICATE KEY UPDATE reaction = VALUES(reaction), updated_at = VALUES(updated_at)');
+        $upsertReaction->execute([
+          ':post_id' => (int) $post['id'],
+          ':community_user_id' => (int) $currentUser['id'],
+          ':reaction' => $reaction,
+          ':created_at' => $now,
+          ':updated_at' => $now,
+        ]);
+        $authMessage = ucfirst($reaction) . ' recorded.';
+      }
+    }
+  }
+}
+
+$publicUser = blog_public_current_user($pdo);
+
+$reactionCountsStmt = $pdo->prepare('SELECT reaction, COUNT(*) AS total FROM post_reactions WHERE post_id = :post_id GROUP BY reaction');
+$reactionCountsStmt->execute([':post_id' => (int) $post['id']]);
+$reactionRows = $reactionCountsStmt->fetchAll();
+$likeCount = 0;
+$dislikeCount = 0;
+foreach ($reactionRows as $reactionRow) {
+  if (($reactionRow['reaction'] ?? '') === 'like') {
+    $likeCount = (int) $reactionRow['total'];
+  }
+  if (($reactionRow['reaction'] ?? '') === 'dislike') {
+    $dislikeCount = (int) $reactionRow['total'];
+  }
+}
+
+$userReaction = null;
+if ($publicUser) {
+  $userReactionStmt = $pdo->prepare('SELECT reaction FROM post_reactions WHERE post_id = :post_id AND community_user_id = :community_user_id LIMIT 1');
+  $userReactionStmt->execute([
+    ':post_id' => (int) $post['id'],
+    ':community_user_id' => (int) $publicUser['id'],
+  ]);
+  $userReaction = $userReactionStmt->fetchColumn() ?: null;
+}
+
+$commentsStmt = $pdo->prepare('SELECT c.comment_text, c.created_at, u.full_name
+    FROM post_comments c
+    INNER JOIN community_users u ON u.id = c.community_user_id
+    WHERE c.post_id = :post_id AND c.status = "visible"
+    ORDER BY c.created_at DESC
+    LIMIT 80');
+$commentsStmt->execute([':post_id' => (int) $post['id']]);
+$comments = $commentsStmt->fetchAll();
+
+$shareUrl = blog_url('post.php?slug=' . urlencode($slug));
 
 $metaTitle = $post['title'] . ' | ' . BLOG_SITE_NAME;
 $metaDescription = $post['summary'] !== '' ? $post['summary'] : blog_excerpt($post['content'], 160);
@@ -91,7 +221,11 @@ if (!empty($post['source_url'])) {
         <a href="mailto:events@cstsghana.com">events@cstsghana.com</a>
       </div>
       <div class="utility-cta">
-        <a href="admin/login.php" class="utility-btn">Admin Portal</a>
+        <?php if ($publicUser): ?>
+          <span class="utility-btn" style="background: linear-gradient(120deg, #1e5a86, #2f7cad);">Hi, <?php echo blog_e((string) $publicUser['full_name']); ?></span>
+        <?php else: ?>
+          <a href="#community-auth" class="utility-btn">Join Conversation</a>
+        <?php endif; ?>
       </div>
     </div>
   </div>
@@ -102,6 +236,11 @@ if (!empty($post['source_url'])) {
       <nav class="nav-links">
         <a href="index.php">Back to blog</a>
         <a href="https://cstsghana.com" target="_blank" rel="noopener noreferrer">CSTS Website</a>
+        <?php if ($publicUser): ?>
+          <a href="#comments">My comments</a>
+        <?php else: ?>
+          <a href="#community-auth">Create Account</a>
+        <?php endif; ?>
         <a href="admin/login.php">Admin</a>
       </nav>
     </div>
@@ -118,6 +257,8 @@ if (!empty($post['source_url'])) {
   <main class="container">
     <article class="article article-wide">
       <span class="badge"><?php echo blog_e($post['category']); ?></span>
+      <?php if ($authMessage): ?><div class="flash ok"><?php echo blog_e($authMessage); ?></div><?php endif; ?>
+      <?php if ($authError): ?><div class="flash err"><?php echo blog_e($authError); ?></div><?php endif; ?>
       <?php if (!empty($post['summary'])): ?>
         <p class="summary" style="font-size:16px;"><?php echo blog_e($post['summary']); ?></p>
       <?php endif; ?>
@@ -128,6 +269,91 @@ if (!empty($post['source_url'])) {
         <p class="meta" style="margin: 0 0 12px;">Source: <a href="<?php echo blog_e($post['source_url']); ?>" target="_blank" rel="noopener noreferrer nofollow"><?php echo blog_e($post['source_name'] ?: 'External'); ?></a></p>
       <?php endif; ?>
       <div class="article-content"><?php echo $post['content']; ?></div>
+
+      <section class="post-engagement">
+        <h3>Post Engagement</h3>
+        <div class="post-actions-grid">
+          <form method="post" class="post-action-form">
+            <input type="hidden" name="form_type" value="reaction">
+            <input type="hidden" name="reaction" value="like">
+            <button class="btn btn-outline post-action-btn <?php echo $userReaction === 'like' ? 'is-active' : ''; ?>" type="submit">Like <span><?php echo $likeCount; ?></span></button>
+          </form>
+          <form method="post" class="post-action-form">
+            <input type="hidden" name="form_type" value="reaction">
+            <input type="hidden" name="reaction" value="dislike">
+            <button class="btn btn-outline post-action-btn <?php echo $userReaction === 'dislike' ? 'is-active' : ''; ?>" type="submit">Dislike <span><?php echo $dislikeCount; ?></span></button>
+          </form>
+          <button class="btn btn-outline post-action-btn" type="button" id="share-post-btn" data-share-url="<?php echo blog_e($shareUrl); ?>">Share</button>
+          <button class="btn btn-outline post-action-btn" type="button" id="copy-post-btn" data-copy-url="<?php echo blog_e($shareUrl); ?>">Copy Link</button>
+        </div>
+        <p class="meta" id="share-feedback" style="margin:8px 0 0;"></p>
+      </section>
+
+      <section class="community-auth" id="community-auth">
+        <?php if ($publicUser): ?>
+          <div class="community-user-box">
+            <p class="meta" style="margin:0 0 8px;">Signed in as <?php echo blog_e((string) $publicUser['full_name']); ?> (<?php echo blog_e((string) $publicUser['email']); ?>)</p>
+            <form method="post">
+              <input type="hidden" name="form_type" value="logout">
+              <button class="btn btn-outline" type="submit">Log out</button>
+            </form>
+          </div>
+        <?php else: ?>
+          <div class="community-auth-grid">
+            <form method="post" class="community-form">
+              <input type="hidden" name="form_type" value="register">
+              <h4>Create account</h4>
+              <label>Full name</label>
+              <input class="input" name="full_name" required>
+              <label>Email</label>
+              <input class="input" type="email" name="email" required>
+              <label>Password</label>
+              <input class="input" type="password" name="password" minlength="6" required>
+              <button class="btn" type="submit" style="margin-top:10px;">Create account</button>
+            </form>
+
+            <form method="post" class="community-form">
+              <input type="hidden" name="form_type" value="login">
+              <h4>Sign in</h4>
+              <label>Email</label>
+              <input class="input" type="email" name="email" required>
+              <label>Password</label>
+              <input class="input" type="password" name="password" required>
+              <button class="btn" type="submit" style="margin-top:10px;">Sign in</button>
+            </form>
+          </div>
+        <?php endif; ?>
+      </section>
+
+      <section class="post-comments" id="comments">
+        <h3>Comments (<?php echo count($comments); ?>)</h3>
+
+        <?php if ($publicUser): ?>
+          <form method="post" class="comment-form">
+            <input type="hidden" name="form_type" value="comment">
+            <label for="comment_text">Share your thoughts</label>
+            <textarea class="textarea" id="comment_text" name="comment_text" rows="4" maxlength="1500" required></textarea>
+            <button class="btn" type="submit" style="margin-top:10px;">Post comment</button>
+          </form>
+        <?php else: ?>
+          <p class="meta">Create an account or sign in above to post a comment.</p>
+        <?php endif; ?>
+
+        <div class="comment-list">
+          <?php if (!$comments): ?>
+            <p class="meta">No comments yet. Start the conversation.</p>
+          <?php endif; ?>
+          <?php foreach ($comments as $comment): ?>
+            <article class="comment-card">
+              <div class="comment-head">
+                <strong><?php echo blog_e((string) $comment['full_name']); ?></strong>
+                <span class="meta"><?php echo blog_format_date((string) $comment['created_at']); ?></span>
+              </div>
+              <p><?php echo nl2br(blog_e((string) $comment['comment_text'])); ?></p>
+            </article>
+          <?php endforeach; ?>
+        </div>
+      </section>
     </article>
   </main>
 
@@ -184,5 +410,58 @@ if (!empty($post['source_url'])) {
       </div>
     </div>
   </footer>
+
+  <script>
+    const shareBtn = document.getElementById('share-post-btn');
+    const copyBtn = document.getElementById('copy-post-btn');
+    const shareFeedback = document.getElementById('share-feedback');
+
+    function setShareFeedback(message) {
+      if (shareFeedback) {
+        shareFeedback.textContent = message;
+      }
+    }
+
+    if (shareBtn) {
+      shareBtn.addEventListener('click', async () => {
+        const shareUrl = shareBtn.getAttribute('data-share-url') || window.location.href;
+        try {
+          if (navigator.share) {
+            await navigator.share({
+              title: document.title,
+              text: 'Check out this post on CSTS Blog',
+              url: shareUrl,
+            });
+            setShareFeedback('Post shared successfully.');
+          } else if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(shareUrl);
+            setShareFeedback('Share not supported here, so link was copied instead.');
+          } else {
+            window.prompt('Copy this link:', shareUrl);
+            setShareFeedback('Share not supported. Use the copied link.');
+          }
+        } catch (err) {
+          setShareFeedback('Share canceled or unavailable.');
+        }
+      });
+    }
+
+    if (copyBtn) {
+      copyBtn.addEventListener('click', async () => {
+        const copyUrl = copyBtn.getAttribute('data-copy-url') || window.location.href;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(copyUrl);
+            setShareFeedback('Post link copied.');
+          } else {
+            window.prompt('Copy this link:', copyUrl);
+            setShareFeedback('Clipboard API unavailable. Copy link from prompt.');
+          }
+        } catch (err) {
+          setShareFeedback('Unable to copy link on this browser.');
+        }
+      });
+    }
+  </script>
 </body>
 </html>
