@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/content.php';
 blog_require_admin();
 
 $pdo = blog_db();
@@ -23,14 +24,14 @@ $flash = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   $title = trim((string) ($_POST['title'] ?? ''));
   $summary = trim((string) ($_POST['summary'] ?? ''));
-  $content = trim((string) ($_POST['content'] ?? ''));
+  $content = blog_content_html((string) ($_POST['content'] ?? ''));
   $category = (string) ($_POST['category'] ?? 'news');
   $status = (string) ($_POST['status'] ?? 'published');
   $imageUrl = trim((string) ($_POST['image_url'] ?? ''));
   $removeImage = (string) ($_POST['remove_image'] ?? '') === '1';
   $existingImage = (string) ($post['image_url'] ?? '');
 
-    if ($title === '' || $content === '') {
+    if ($title === '' || blog_content_is_empty($content)) {
         $error = 'Title and content are required.';
   } elseif (!in_array($category, ['news', 'events', 'market-insights'], true) || !in_array($status, ['draft', 'published'], true)) {
         $error = 'Invalid category or status.';
@@ -153,8 +154,8 @@ require __DIR__ . '/partials/sidebar.php';
                 <textarea class="a-textarea" id="ep-summary" name="summary" rows="2"><?php echo htmlspecialchars((string)$post['summary'], ENT_QUOTES, 'UTF-8'); ?></textarea>
               </div>
               <div class="a-form-full a-field">
-                <label class="a-label" for="ep-content">Content <span>(HTML supported)</span></label>
-                <textarea class="a-textarea" id="ep-content" name="content" rows="12" required><?php echo htmlspecialchars((string)$post['content'], ENT_QUOTES, 'UTF-8'); ?></textarea>
+                <label class="a-label" for="ep-content">Content</label>
+                <textarea class="a-textarea" id="ep-content" name="content" data-blog-editor rows="12" required><?php echo htmlspecialchars($error !== '' ? (string) ($_POST['content'] ?? '') : (string) $post['content'], ENT_QUOTES, 'UTF-8'); ?></textarea>
               </div>
               <div class="a-field">
                 <label class="a-label" for="ep-category">Category</label>
@@ -206,5 +207,7 @@ require __DIR__ . '/partials/sidebar.php';
     </main>
   </div><!-- /.a-main -->
 </div><!-- /.a-app -->
+<script src="../assets/vendor/quill/quill.js"></script>
+<script src="../assets/editor.js"></script>
 </body>
 </html>

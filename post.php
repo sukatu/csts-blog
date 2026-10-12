@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/includes/config.php';
+require_once __DIR__ . '/includes/content.php';
 require_once __DIR__ . '/includes/public_auth.php';
 
 $slug = trim($_GET['slug'] ?? '');
@@ -271,7 +272,7 @@ if (!empty($post['source_url'])) {
       <?php if (!empty($post['source_url'])): ?>
         <p class="meta" style="margin: 0 0 12px;">Source: <a href="<?php echo blog_e($post['source_url']); ?>" target="_blank" rel="noopener noreferrer nofollow"><?php echo blog_e($post['source_name'] ?: 'External'); ?></a></p>
       <?php endif; ?>
-      <div class="article-content"><?php echo $post['content']; ?></div>
+      <div class="article-content"><?php echo blog_content_html((string) $post['content']); ?></div>
 
       <section class="post-engagement">
         <h3>Post Engagement</h3>

@@ -14,6 +14,8 @@ $adminPageTitle = $adminPageTitle ?? 'Admin';
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title><?php echo htmlspecialchars($adminPageTitle, ENT_QUOTES, 'UTF-8'); ?> — CSTS Blog Admin</title>
   <link rel="stylesheet" href="../assets/admin.css">
+  <link rel="stylesheet" href="../assets/vendor/quill/quill.snow.css">
+  <link rel="stylesheet" href="../assets/editor.css">
 </head>
 <body class="a-body">
 <div class="a-app">
